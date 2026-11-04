@@ -1,0 +1,256 @@
+networks:
+  maritime-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  contracts_storage:
+    driver: local
+
+services:
+  # -------------------------------------------------------------
+  # Base de Datos Relacional y Vectorial (PostgreSQL + pgvector)
+  # -------------------------------------------------------------
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: maritime-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
+      POSTGRES_DB: ${POSTGRES_DB:-maritime_rag}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-maritime_rag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - maritime-net
+
+  # -------------------------------------------------------------
+  # Message Broker para Celery (Redis)
+  # -------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: maritime-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - maritime-net
+
+  # -------------------------------------------------------------
+  # Colector de Trazas y Observabilidad (Jaeger OTel)
+  # -------------------------------------------------------------
+  # Jaeger v2 con la version fija: el tag `all-in-one:latest` se quedo en la linea v1 (sin
+  # mantenimiento desde 2026). v2 acepta OTLP por defecto, sin COLLECTOR_OTLP_ENABLED.
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.22.0
+    container_name: maritime-jaeger
+    restart: unless-stopped
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686" # Web UI de Jaeger
+      - "${OTEL_PORT:-4318}:4318"         # Receptor OTLP HTTP
+    networks:
+      - maritime-net
+
+  # -------------------------------------------------------------
+  # API Backend (FastAPI + uv)
+  # -------------------------------------------------------------
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: maritime-api
+    restart: unless-stopped
+    command: >
+      sh -c "uv run alembic upgrade head &&
+             uv run uvicorn maritime.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 5"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-gemini-1.5-flash}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-30.0}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-mock}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-gemini/text-embedding-004}
+      - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL:-}
+      - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-768}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@db:5432/${POSTGRES_DB:-maritime_rag}}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      - STORAGE_PATH=${STORAGE_PATH:-/app/storage/contracts}
+      - MAX_FILE_SIZE_BYTES=${MAX_FILE_SIZE_BYTES:-26214400}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - CHUNK_MAX_CHARS=${CHUNK_MAX_CHARS:-500}
+      - CHUNK_OVERLAP_CHARS=${CHUNK_OVERLAP_CHARS:-80}
+      - RAG_SIMILARITY_THRESHOLD=${RAG_SIMILARITY_THRESHOLD:-0.25}
+      - RAG_TOP_K=${RAG_TOP_K:-5}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-otlp}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-maritime-api}
+      - EVENT_BUS_BACKEND=${EVENT_BUS_BACKEND:-redis}
+      - EVENT_REDIS_URL=${EVENT_REDIS_URL:-redis://redis:6379/2}
+      - EVENT_STREAM_KEY=${EVENT_STREAM_KEY:-maritime:events}
+      - EVENT_STREAM_MAXLEN=${EVENT_STREAM_MAXLEN:-10000}
+    volumes:
+      - contracts_storage:/app/storage/contracts
+    ports:
+      - "${API_PORT:-8000}:8000"
+    # Healthy solo cuando ya aplico las migraciones y uvicorn responde: el frontend espera a esto.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    networks:
+      - maritime-net
+
+  # -------------------------------------------------------------
+  # Worker Asíncrono (Celery + uv)
+  # -------------------------------------------------------------
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: maritime-worker
+    restart: unless-stopped
+    command: uv run celery -A maritime.infrastructure.celery.celery_app worker -l info -c 2
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-gemini-1.5-flash}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-30.0}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-mock}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-gemini/text-embedding-004}
+      - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL:-}
+      - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-768}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@db:5432/${POSTGRES_DB:-maritime_rag}}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      - STORAGE_PATH=${STORAGE_PATH:-/app/storage/contracts}
+      - MAX_FILE_SIZE_BYTES=${MAX_FILE_SIZE_BYTES:-26214400}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - CHUNK_MAX_CHARS=${CHUNK_MAX_CHARS:-500}
+      - CHUNK_OVERLAP_CHARS=${CHUNK_OVERLAP_CHARS:-80}
+      - RAG_SIMILARITY_THRESHOLD=${RAG_SIMILARITY_THRESHOLD:-0.25}
+      - RAG_TOP_K=${RAG_TOP_K:-5}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-otlp}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-maritime-worker}
+      - EVENT_BUS_BACKEND=${EVENT_BUS_BACKEND:-redis}
+      - EVENT_REDIS_URL=${EVENT_REDIS_URL:-redis://redis:6379/2}
+      - EVENT_STREAM_KEY=${EVENT_STREAM_KEY:-maritime:events}
+      - EVENT_STREAM_MAXLEN=${EVENT_STREAM_MAXLEN:-10000}
+      - PROCESSING_TIMEOUT_SECONDS=${PROCESSING_TIMEOUT_SECONDS:-900}
+      - TASK_VISIBILITY_TIMEOUT_SECONDS=${TASK_VISIBILITY_TIMEOUT_SECONDS:-600}
+    volumes:
+      - contracts_storage:/app/storage/contracts
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    networks:
+      - maritime-net
+
+  # -------------------------------------------------------------
+  # Planificador Celery (Beat): ejecuta cada minuto el "reaper" que marca como
+  # failed los documentos atascados en processing (worker muerto sin manejar el error).
+  # -------------------------------------------------------------
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: maritime-beat
+    restart: unless-stopped
+    command: uv run celery -A maritime.infrastructure.celery.celery_app beat -l info -s /tmp/celerybeat-schedule
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      - TASK_VISIBILITY_TIMEOUT_SECONDS=${TASK_VISIBILITY_TIMEOUT_SECONDS:-600}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - maritime-net
+
+  # -------------------------------------------------------------
+  # Monitor de Tareas Celery (Flower)
+  # -------------------------------------------------------------
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: maritime-flower
+    restart: unless-stopped
+    command: uv run celery -A maritime.infrastructure.celery.celery_app flower --port=5555
+    ports:
+      # Solo desde tu maquina: Flower puede apagar y reiniciar workers desde su interfaz.
+      - "127.0.0.1:${FLOWER_PORT:-5555}:5555"
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      # Usuario:clave de la interfaz. El valor por defecto es solo para la demo local (el puerto
+      # solo escucha en 127.0.0.1); cambialo en cualquier otro entorno.
+      - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH:-admin:admin}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - maritime-net
+
+  # -------------------------------------------------------------
+  # Frontend SPA (Bun + Vite)
+  # -------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: maritime-frontend
+    restart: unless-stopped
+    environment:
+      - BACKEND_PROXY_TARGET=${BACKEND_PROXY_TARGET:-http://api:8000}
+      - VITE_API_URL=${VITE_API_URL:-/api/v1}
+      - VITE_POLL_INTERVAL_MS=${VITE_POLL_INTERVAL_MS:-2000}
+      - VITE_API_TIMEOUT_MS=${VITE_API_TIMEOUT_MS:-30000}
+      - VITE_MAX_FILE_SIZE_MB=${VITE_MAX_FILE_SIZE_MB:-25}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    # Sin esperar a que la API este sana, Vite arrancaba antes y el proxy daba ECONNREFUSED
+    # mientras la API aplicaba las migraciones.
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - maritime-net

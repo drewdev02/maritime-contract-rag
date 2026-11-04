@@ -1,0 +1,57 @@
+# Infraestructura minima para desarrollo local (api, worker y frontend corren en bare metal).
+# Uso: docker compose -f docker-compose.dev.yml up -d   (o: make infra-up)
+# Usa su propio proyecto (maritime-dev): volumenes y contenedores separados de docker-compose.yml,
+# asi que la BD de desarrollo empieza vacia (make migrate). No lo corras a la vez que el stack completo:
+# comparten los mismos puertos del host.
+
+name: maritime-dev
+
+volumes:
+  postgres_data:
+  redis_data:
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: maritime-db-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
+      POSTGRES_DB: ${POSTGRES_DB:-maritime_rag}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-maritime_rag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: maritime-redis-dev
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Opcional: trazas OTel. Activar con: docker compose -f docker-compose.dev.yml --profile tracing up -d
+  # Jaeger v2, con la version fija: el tag `all-in-one:latest` se quedo en la linea v1, que ya
+  # no tiene mantenimiento. v2 acepta OTLP sin configuracion extra (no usa COLLECTOR_OTLP_ENABLED).
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.22.0
+    container_name: maritime-jaeger-dev
+    restart: unless-stopped
+    profiles: ["tracing"]
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      - "${OTEL_PORT:-4318}:4318"
