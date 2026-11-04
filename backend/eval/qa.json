@@ -1,0 +1,16 @@
+[
+  {"id": "q01", "question": "¿Cuántos días libres tiene el contrato de Maersk antes de la demora?", "document": "maersk_tarifas_2026.pdf", "page": 2, "must_contain": "7 dias libres"},
+  {"id": "q02", "question": "¿Cuántos días libres otorga CMA CGM en terminal?", "document": "cmacgm_condiciones_2026.pdf", "page": 1, "must_contain": "10 dias libres"},
+  {"id": "q03", "question": "¿Cuál es la tarifa de un contenedor de 40 pies High Cube con Maersk?", "document": "maersk_tarifas_2026.pdf", "page": 2, "must_contain": "2250"},
+  {"id": "q04", "question": "¿Qué recargo se cobra desde el día 15 de demora en el contrato de Maersk?", "document": "maersk_tarifas_2026.pdf", "page": 3, "must_contain": "150"},
+  {"id": "q05", "question": "¿Qué penalización hay por cancelar una reserva con menos de 72 horas de antelación?", "document": "maersk_tarifas_2026.pdf", "page": 3, "must_contain": "50%"},
+  {"id": "q06", "question": "¿Cuál es la tarifa de un contenedor reefer de 40 pies con CMA CGM?", "document": "cmacgm_condiciones_2026.pdf", "page": 2, "must_contain": "3400"},
+  {"id": "q07", "question": "¿En cuántos días se pagan las facturas de CMA CGM y qué interés moratorio aplica?", "document": "cmacgm_condiciones_2026.pdf", "page": 2, "must_contain": "45 dias"},
+  {"id": "q08", "question": "¿Cuánto cuesta el almacenaje por día en el terminal de MSC?", "document": "msc_terminal_servicios.pdf", "page": 2, "must_contain": "Almacenaje"},
+  {"id": "q09", "question": "¿Hasta qué límite responde MSC por daños a la carga?", "document": "msc_terminal_servicios.pdf", "page": 2, "must_contain": "50000"},
+  {"id": "q10", "question": "¿Qué eventos se consideran fuerza mayor en el contrato de Hapag-Lloyd?", "document": "hapag_seguros_fuerza_mayor.pdf", "page": 1, "must_contain": "huelgas portuarias"},
+  {"id": "q11", "question": "¿Cuál es el deducible de la cobertura ampliada del seguro de carga?", "document": "hapag_seguros_fuerza_mayor.pdf", "page": 2, "must_contain": "Ampliada"},
+  {"id": "q12", "question": "¿Con cuánto preaviso se puede terminar anticipadamente el contrato con Hapag-Lloyd?", "document": "hapag_seguros_fuerza_mayor.pdf", "page": 2, "must_contain": "90 dias"},
+  {"id": "u01", "question": "¿Cuál es la política de vacaciones de los empleados de Naviera Portecho?", "document": null, "page": null, "must_contain": null},
+  {"id": "u02", "question": "¿Qué tarifa cobra COSCO por el puerto de Shanghai?", "document": null, "page": null, "must_contain": null}
+]
