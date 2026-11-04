@@ -1,0 +1,85 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing & Quality
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local Storage
+storage/contracts/*
+!storage/contracts/.gitkeep
+backend/storage/contracts/*
+!backend/storage/contracts/.gitkeep
+
+# Database & Broker data
+postgres_data/
+redis_data/
+
+# Frontend (Bun / Node)
+node_modules/
+bun.lockb
+.dist/
+dist/
+.output/
+.vercel
+.turbo
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# AI Agent Instructions
+AGENTS.md
+.agents/
+skills-lock.json
+
+# Playwright & Screenshots
+.playwright-mcp/
+*.png
+
+
+# Almacenamiento local de desarrollo (make api/worker)
+.storage/
